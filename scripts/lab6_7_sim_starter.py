@@ -380,7 +380,7 @@ class ObstacleAvoidingWaypointController:
             self.robot_ctrl_pub.publish(Twist())
             return
         ranges = list(self.laserscan.ranges)
-        front_raw = ranges[0:25] + ranges[-25:]
+        front_raw = ranges[345:] + ranges[:15]
         front =[r for r in front_raw if (r >self.laserscan.range_min and r <self.laserscan.range_max)]
         front_min = min(front) if len(front) > 0 else inf
         if self.ir_distance is None:

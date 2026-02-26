@@ -384,13 +384,13 @@ class ObstacleAvoidingWaypointController:
         front =[r for r in front_raw if (r >self.laserscan.range_min and r <self.laserscan.range_max)]
         front_min = min(front) if len(front) > 0 else inf
         if self.ir_distance is None:
-            base_u = 0.0
+            base_u = -1.5  # turn right to search for wall on left camera
         else:
             err = self.wall_following_desired_distance - self.ir_distance
             base_u = self.wall_controller.control(err, time())
         u=base_u
         if front_min<0.8:
-            u=2.0
+            u=-2.0  # turn right: wall on front/right sweeps to left side where camera is
         v=0.08
         if front_min <0.95:
             v=0.0

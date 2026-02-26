@@ -380,9 +380,9 @@ class ObstacleAvoidingWaypointController:
             self.robot_ctrl_pub.publish(Twist())
             return
         ranges = list(self.laserscan.ranges)
-        # Check right/front side for obstacles (since IR camera is on left)
-        # Indices 250-290 represent ~250-290 degrees (right side of robot)
-        front_raw = ranges[250:290]
+        # Check front for obstacles. Scan starts at 0 (front) going CCW to 2pi,
+        # so front cone (±15°) wraps around index 0: [345:] + [:15]
+        front_raw = ranges[345:] + ranges[:15]
         front =[r for r in front_raw if (r >self.laserscan.range_min and r <self.laserscan.range_max)]
         front_min = min(front) if len(front) > 0 else inf
         if self.ir_distance is None:

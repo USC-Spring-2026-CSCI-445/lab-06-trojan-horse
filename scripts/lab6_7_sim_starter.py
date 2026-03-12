@@ -53,11 +53,11 @@ class PIDController:
         ######### Your code starts here #########
         self.kP = kP
         self.kI = kI
-        self.kD = kD
+        self.kD = kD #setting all the gain vals
         self.kS = kS
         self.u_min = u_min
         self.u_max = u_max
-        self.t_prev=None
+        self.t_prev=0.0
         self.err_prev=0.0
         self.err_integral= 0.0
         ######### Your code ends here #########
@@ -65,21 +65,25 @@ class PIDController:
     def control(self, err, t):
         # compute PID control action here
         ######### Your code starts here #########
-        if self.t_prev is None:
-            self.t_prev = t
-            self.err_prev = err
-            return 0.0
+        # if self.t_prev is None: #trojan horse old code
+        #     self.t_prev = t
+        #     self.err_prev = err
+        #     return 0.0
 
         dt = t- self.t_prev
         if dt <= 1e-6:
             return 0.0
 
         self.err_integral += err*dt
-        err_dot = (err - self.err_prev)/dt
-        u = self.kP*err +self.kI *self.err_integral+self.kD*err_dot
+        self.err_integral = max(-5.0,min(5.0,self.err_integral))
+        err_dot = (err - self.err_prev)/dt #put a clamp to prevent windup
+        u = self.kP*err +self.kI *self.err_integral+self.kD*err_dot #adding the intergral in there
         u_nxt= max(self.u_min, min(u,self.u_max))
-        if u_nxt != u:
-            self.err_integral -= err *dt
+        # if u_nxt != u:  #we dont want the integral to grow
+        #     self.err_integral -= err *dt   trojan horse old code
+        
+        if self.kS >0:
+            self.err_integral += (u_nxt - u) / self.kS
         self.t_prev = t
         self.err_prev=err
         return u_nxt
@@ -99,24 +103,24 @@ class PDController:
         self.kP = kP
         self.kD = kD
         self.kS = kS
-        self.u_min = u_min
+        self.u_min = u_min  #more gain setting
         self.u_max = u_max
-        self.t_prev=None
+        self.t_prev=0
         self.err_prev=0.0
         ######### Your code ends here #########
 
     def control(self, err, t):
-        if self.t_prev is None:
-            self.t_prev = t
-            self.err_prev = err
-            return 0.0
+        # if self.t_prev is None:
+        #     self.t_prev = t
+        #     self.err_prev = err
+        #     return 0.0
         dt = t - self.t_prev
         # Compute PD control action here
         ######### Your code starts here #########
         if dt <= 1e-6:
             return 0.0
-        err_dot = (err - self.err_prev)/dt
-        u = self.kP*err+self.kD*err_dot
+        err_dot = (err - self.err_prev)/dt  #getting the derv term
+        u = self.kS * (self.kP*err+self.kD*err_dot)
         u= max(self.u_min, min(u,self.u_max))
         self.t_prev = t
         self.err_prev=err
@@ -158,22 +162,22 @@ class ObstacleFreeWaypointController:
         # define linear and angular PID controllers here
         ######### Your code starts here #########
         self.angular_controller = PIDController(
-            kP=2.4,
-            kI=0.0,
-            kD=0.2,
+            kP=0.48,
+            kI=0.026, #creating controllers with tuning 
+            kD=0.425,
             kS=1.0,
-            u_min=-2.75,
-            u_max=2.75,
+            u_min=-2.826,
+            u_max=2.826,
         )
         self.linear_controller = PIDController(
-            kP=0.75,
-            kI=0.0,
-            kD=0.1,
-            kS=0.0,
+            kP=0.487,
+            kI=0.026,
+            kD=0.102,
+            kS=1.0,
             u_min=0.0,
-            u_max=0.2,
+            u_max=0.5,
         )
-        self.waypoint_threshold=0.1
+        self.waypoint_threshold=0.1 #some extra params
         self.angle_gate = radians(20)
         ######### Your code ends here #########
 
@@ -196,12 +200,13 @@ class ObstacleFreeWaypointController:
         dx = goal_position["x"] - self.current_position["x"]
         dy = goal_position["y"] - self.current_position["y"]
         distance_error = sqrt(dx**2 + dy**2)
-        target_angle = atan2(dy,dx)
-        angle_error = target_angle -self.current_position["theta"]
-        while angle_error >pi:
-            angle_error -= 2*pi
-        while angle_error < -pi:
-            angle_error+= 2*pi
+        anglecalc = atan2(dy,dx)  #we are tring to keep angle between pi and -pi
+        #anglecalc = target_angle -self.current_position["theta"]
+        angle_error = atan2(sin(anglecalc - self.current_position["theta"]),cos(anglecalc - self.current_position["theta"]))
+        # while angle_error >pi:
+        #     angle_error -= 2*pi
+        # while angle_error < -pi: trojan horse old code
+        #     angle_error+= 2*pi
         ######### Your code ends here #########
 
         return distance_error, angle_error
@@ -219,40 +224,38 @@ class ObstacleFreeWaypointController:
             ######### Your code starts here #########
             if current_waypoint_idx >= len(self.waypoints):
                 ctrl_msg.linear.x=0.0
-                ctrl_msg.angular.z=0.0
+                ctrl_msg.angular.z=0.0  #stopping robo if we reached
                 self.robot_ctrl_pub.publish(ctrl_msg)
                 rospy.loginfo("waypoints reached")
                 rate.sleep()
                 continue
             current_waypoint = self.waypoints[current_waypoint_idx]
-            error = self.calculate_error(current_waypoint)
+            error = self.calculate_error(current_waypoint) #get waypoint err
             if error is None:
                 rate.sleep()
                 continue
             distance_error, angle_error = error
-            current_time = time()
+            #current_time = time()
 
             if distance_error < self.waypoint_threshold:
                 rospy.loginfo(f"reached waypoint {current_waypoint_idx}: {current_waypoint}")
-                current_waypoint_idx +=1
-                self.linear_controller.err_integral=0.0
-                self.angular_controller.err_integral=0.0
+                current_waypoint_idx +=1  #adding index of wp if we reach
+                #self.linear_controller.err_integral=0.0
+                #self.angular_controller.err_integral=0.0
                 ctrl_msg.linear.x=0.0
                 ctrl_msg.angular.z=0.0
-                self.robot_ctrl_pub.publish(ctrl_msg)
-                rate.sleep()
-                continue
+                #self.robot_ctrl_pub.publish(ctrl_msg)
+                #rate.sleep()
             
-            cmd_linear_vel = self.linear_controller.control(distance_error, current_time)
-            cmd_angular_vel= self.angular_controller.control(angle_error, current_time)
-
-            if abs(angle_error) > self.angle_gate:
-                cmd_linear_vel = 0.0
-            
-            ctrl_msg.linear.x = cmd_linear_vel
-            ctrl_msg.angular.z = cmd_angular_vel
+            else:
+                current_time = time() #getting control from the controls to contine
+                cmd_linear_vel = self.linear_controller.control(distance_error, current_time)
+                cmd_angular_vel= self.angular_controller.control(angle_error, current_time)
+                # if abs(angle_error) > self.angle_gate:
+                #     cmd_linear_vel = 0.0
+                ctrl_msg.linear.x = cmd_linear_vel
+                ctrl_msg.angular.z = cmd_angular_vel
             self.robot_ctrl_pub.publish(ctrl_msg)
-
             rospy.loginfo(f"Waypoint {current_waypoint_idx}, distance: {distance_error:.3f}, angle error: {angle_error:.3f}, linear velocity: {cmd_linear_vel:.3f}, angular velocity: {cmd_angular_vel:.3f}")
             ######### Your code ends here #########
             rate.sleep()
@@ -283,36 +286,36 @@ class ObstacleAvoidingWaypointController:
         # Add PID controllers here for obstacle avoidance and waypoint following
         ######### Your code starts here #########
         self.angular_controller = PIDController(
-            kP=2.4,
-            kI=0.0,
-            kD=0.2,
+            kP=0.48,
+            kI=0.026,
+            kD=0.452,
             kS=1.0,
-            u_min=-2.75,
-            u_max=2.75,
+            u_min=-2.826,
+            u_max=2.826,
         )
         self.linear_controller = PIDController(
-            kP=0.75,
-            kI=0.0,
+            kP=0.487,
+            kI=0.026, #trail and error
             kD=0.1,
-            kS=0.0,
-            u_min=0.0,
-            u_max=0.2,
-        )
-
-        self.wall_controller =PDController(
-            kP=1.8,
-            kD=0.3,
             kS=1.0,
-            u_min=-2.75,
-            u_max=2.75,
+            u_min=0.0,
+            u_max=0.5,
         )
 
-        self.waypoint_threshold= 0.15
-        self.base_linear_velocity= 0.15
-        self.angle_gate = radians(20)
-        self._avoiding = False
-        self._avoid_exit_margin = 0.25
-        self.wall_following_desired_distance = 0.75
+        self.wall_controller =PDController( #adding a wall follow controller
+            kP=0.295,
+            kD=0.575,
+            kS=1.0,
+            u_min=-2.826,
+            u_max=2.826,
+        )
+
+        self.waypoint_threshold= 0.1 # this is the dist where we think the wp is reached
+        # self.base_linear_velocity= 0.15 trojan horse old code
+        # self.angle_gate = radians(20)
+        # self._avoiding = False
+        # self._avoid_exit_margin = 0.25  #maybe change to .5
+        # self.wall_following_desired_distance = 0.75
         ######### Your code ends here #########
 
     def robot_laserscan_callback(self, msg: LaserScan):
@@ -347,22 +350,23 @@ class ObstacleAvoidingWaypointController:
         dx = goal_position["x"] - self.current_position["x"]
         dy = goal_position["y"] - self.current_position["y"]
         distance_error = sqrt(dx**2 + dy**2)
-        target_angle = atan2(dy,dx)
-        angle_error = target_angle -self.current_position["theta"]
-        while angle_error >pi:
-            angle_error -= 2*pi
-        while angle_error < -pi:
-            angle_error+= 2*pi
+        anglecalc = atan2(dy,dx)
+        #anglecalc = target_angle -self.current_position["theta"]
+        angle_error = atan2(sin(anglecalc - self.current_position["theta"]),cos(anglecalc - self.current_position["theta"]))
+        # while angle_error >pi:
+        #     angle_error -= 2*pi
+        # while angle_error < -pi: trojan horse old code
+        #     angle_error+= 2*pi
 
-        current_time = rospy.get_time()
+        current_time = time() #getting control from the controls to contine
         cmd_linear_vel = self.linear_controller.control(distance_error, current_time)
         cmd_angular_vel= self.angular_controller.control(angle_error, current_time)
 
-        if abs(angle_error) > 0.5:
-            cmd_linear_vel *= max(0.0, 1.0 - abs(angle_error) / pi)
+        # if abs(angle_error) > 0.5: sherwin changes
+        #     cmd_linear_vel *= max(0.0, 1.0 - abs(angle_error) / pi)
             
         ctrl_msg = Twist()
-        ctrl_msg.linear.x = cmd_linear_vel
+        ctrl_msg.linear.x = cmd_linear_vel #set the velocities
         ctrl_msg.angular.z = cmd_angular_vel
         self.robot_ctrl_pub.publish(ctrl_msg)
         ######### Your code ends here #########
@@ -376,29 +380,37 @@ class ObstacleAvoidingWaypointController:
         ctrl_msg = Twist()
 
         ######### Your code starts here #########
-        if self.laserscan is None or self.current_position is None:
-            self.robot_ctrl_pub.publish(Twist())
-            return
-        ranges = list(self.laserscan.ranges)
-        # Check front for obstacles. Scan starts at 0 (front) going CCW to 2pi,
-        # so front cone (±15°) wraps around index 0: [345:] + [:15]
-        front_raw = ranges[345:] + ranges[:15]
-        front =[r for r in front_raw if (r >self.laserscan.range_min and r <self.laserscan.range_max)]
-        front_min = min(front) if len(front) > 0 else inf
-        if self.ir_distance is None:
-            base_u = 0.0
+        if self.ir_distance is None: #slow if there is no read
+            u = 0.0
+            ctrl_msg.linear.x = 0.1
+            ctrl_msg.angular.z = 0.0
         else:
-            err = self.wall_following_desired_distance - self.ir_distance
-            base_u = self.wall_controller.control(err, time())
-        u=base_u
-        if front_min<0.8:
-            u=2.0
-        v=0.08
-        if front_min <0.95:
-            v=0.0
-        
-        ctrl_msg.linear.x=v
-        ctrl_msg.angular.z =u
+            err = self.ir_distance - self.wall_following_desired_distance
+            u = self.wall_controller.control(err,time())
+            ctrl_msg.linear.x =0.15 #based on error set control
+            ctrl_msg.angular.z=u
+        # sherwin is rewriting this
+        # if self.laserscan is None or self.current_position is None:
+        #     self.robot_ctrl_pub.publish(Twist())
+        #     return
+        # ranges = list(self.laserscan.ranges)
+        # front_raw = ranges[0:25] + ranges[-25:]
+        # front =[r for r in front_raw if (r >self.laserscan.range_min and r <self.laserscan.range_max)]
+        # front_min = min(front) if len(front) > 0 else inf
+        # if self.ir_distance is None:
+        #     base_u = 0.0
+        # else:
+        #     err = self.wall_following_desired_distance - self.ir_distance
+        #     base_u = self.wall_controller.control(err, time())
+        # u=base_u
+        # if front_min<0.8:
+        #     u=2.0
+        # v=0.08
+        # if front_min <0.95:
+        #     v=0.0
+        # 
+        # ctrl_msg.linear.x=v
+        # ctrl_msg.angular.z =u
         
         ######### Your code ends here #########
 
@@ -502,49 +514,85 @@ class ObstacleAvoidingWaypointController:
 
             # Travel through waypoints, checking if there is an obstacle in the way. Transition to obstacle avoidance if necessary
             ######### Your code starts here #########
-            if current_waypoint_idx >= len(self.waypoints):
-                stop_msg = Twist()
-                self.robot_ctrl_pub.publish(stop_msg)
-                rospy.loginfo("waypoints reached")
+            thres_enter = 0.5
+            thres_leave = 1.0
+            cone_ang = 20
+            mode = getattr(self, "attribute_mode","go_to_goal")
+            if current_waypoint_idx >= len(self.waypoints): #stop if wps are done
+                ctrl_msg = Twist()
+                ctrl_msg.linear.x = 0.0
+                ctrl_msg.angular.z = 0.0
+                self.robot_ctrl_pub.publish(ctrl_msg)
                 rate.sleep()
                 continue
-            current_waypoint = self.waypoints[current_waypoint_idx]
-          
-            dx = current_waypoint["x"] - self.current_position["x"]
-            dy = current_waypoint["y"]-self.current_position["y"]
-            dist_to_waypoint = sqrt(dx **2 +dy**2)
 
-            if dist_to_waypoint < self.waypoint_threshold:
-                rospy.loginfo(f"reached waypoint {current_waypoint_idx}: {current_waypoint}")
-                current_waypoint_idx +=1
-                state = "go_to_goal"
-                stop_msg = Twist()
-                self.robot_ctrl_pub.publish(stop_msg)
-                rate.sleep()
-                continue
-            
-            obstacle_distances = self.laserscan_distances_to_point(
-                current_waypoint, cone_angle, visualize=True
-            )
-            distances_in_cone = [d for d in obstacle_distances if (not isinf(d)) and d >0.0]
-            min_dist = min(distances_in_cone) if len(distances_in_cone) > 0 else inf
-            enter_thresh = distance_from_wall_safety
-            exit_thresh = distance_from_wall_safety + self._avoid_exit_margin
-            if self._avoiding:
-                if min_dist > exit_thresh:
-                    self._avoiding = False
-                    rospy.loginfo("path is clear")
+            goal = self.waypoints[current_waypoint_idx] #get current wp
+            cone_dist = self.laserscan_distances_to_point(goal, radians(cone_ang), visualize=False) 
+            min_dist_in_cone = min(cone_dist) if len(cone_dist) > 0 else inf #get min cone dist
+
+            if mode == "go_to_goal": #switch to wall follow and goal chase as needed
+                if len(cone_dist) > 0 and min_dist_in_cone < thres_enter:
+                    mode = "wall_following"
             else:
-                if min_dist < enter_thresh:
-                    self._avoiding = True
-                    rospy.loginfo("obstacle detected")
+                if len(cone_dist) == 0 or min_dist_in_cone > thres_leave:
+                    mode = "go_to_goal"
             
-            if self._avoiding:
+            self.attribute_mode = mode
+            if mode == "wall_following":
                 self.obstacle_avoiding_control(visualize=True)
             else:
-                self.waypoint_tracking_control(current_waypoint)
-            
-            rospy.loginfo(f"state: {state}, waypoint: {current_waypoint_idx}, distance: {dist_to_waypoint:.2f}")
+                self.waypoint_tracking_control(goal) #track the wp
+                dx = goal["x"] - self.current_position["x"]
+                dy = goal["y"] - self.current_position["y"]
+                dist = sqrt(dx ** 2 + dy ** 2)
+                if dist < self.waypoint_threshold:
+                    current_waypoint_idx+=1
+
+
+            #sherwin did a complete overhaul of the original obstacle avoidance logic
+            # if current_waypoint_idx >= len(self.waypoints):
+            #     stop_msg = Twist()
+            #     self.robot_ctrl_pub.publish(stop_msg)
+            #     rospy.loginfo("waypoints reached")
+            #     rate.sleep()
+            #     continue
+            # current_waypoint = self.waypoints[current_waypoint_idx]
+            # 
+            # dx = current_waypoint["x"] - self.current_position["x"]
+            # dy = current_waypoint["y"]-self.current_position["y"]
+            # dist_to_waypoint = sqrt(dx **2 +dy**2)
+            #
+            # if dist_to_waypoint < self.waypoint_threshold:
+            #     rospy.loginfo(f"reached waypoint {current_waypoint_idx}: {current_waypoint}")
+            #     current_waypoint_idx +=1
+            #     state = "go_to_goal"
+            #     stop_msg = Twist()
+            #     self.robot_ctrl_pub.publish(stop_msg)
+            #     rate.sleep()
+            #     continue
+            # 
+            # obstacle_distances = self.laserscan_distances_to_point(
+            #     current_waypoint, cone_angle, visualize=True
+            # )
+            # cone_dist = [d for d in obstacle_distances if (not isinf(d)) and d >0.0]
+            # min_dist = min(cone_dist) if len(cone_dist) > 0 else inf
+            # enter_thresh = distance_from_wall_safety
+            # exit_thresh = distance_from_wall_safety + self._avoid_exit_margin
+            # if self._avoiding:
+            #     if min_dist > exit_thresh:
+            #         self._avoiding = False
+            #         rospy.loginfo("path is clear")
+            # else:
+            #     if min_dist < enter_thresh:
+            #         self._avoiding = True
+            #         rospy.loginfo("obstacle detected")
+            # 
+            # if self._avoiding:
+            #     self.obstacle_avoiding_control(visualize=True)
+            # else:
+            #     self.waypoint_tracking_control(current_waypoint)
+            # 
+            # rospy.loginfo(f"state: {state}, waypoint: {current_waypoint_idx}, distance: {dist_to_waypoint:.2f}")
             ######### Your code ends here #########
             rate.sleep()
 
